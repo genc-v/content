@@ -30,7 +30,7 @@ spec:
               value: "redis:6379"
             
             - name: KafkaSettings__BootstrapServers
-              value: "kafka-1768077348-headless:9092"
+              value: "kafka:9092"
             - name: KafkaSettings__Topic
               value: "files.uploaded"
             
