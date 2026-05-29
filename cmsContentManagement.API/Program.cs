@@ -74,23 +74,21 @@ builder.Services.AddSingleton(sp =>
     return new ElasticsearchClient(clientSettings);
 });
 
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSpecificOrigins", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
+        policy.AllowAnyOrigin()
               .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowAnyMethod();
     });
 });
 
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 builder.Services.AddScoped<IContentManagmentService, ContentManagmentService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<ITagService, TagService>();
-builder.Services.AddScoped<IApiKeyService, ApiKeyService>();
 
 builder.Services.Configure<KafkaSettings>(builder.Configuration.GetSection("KafkaSettings"));
 builder.Services.AddHostedService<KafkaConsumerService>();

@@ -15,9 +15,9 @@ public class TagService : ITagService
         _dbContext = dbContext;
     }
 
-    public async Task<List<TagDTO>> GetAllTags(Guid userId, int page, int pageSize, string? searchTerm = null)
+    public async Task<List<TagDTO>> GetAllTags(Guid organisationId, int page, int pageSize, string? searchTerm = null)
     {
-        var query = _dbContext.Tags.Where(t => t.UserId == userId).AsQueryable();
+        var query = _dbContext.Tags.Where(t => t.OrganisationId == organisationId).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
@@ -41,9 +41,9 @@ public class TagService : ITagService
         return await _dbContext.Tags.FindAsync(id);
     }
 
-    public async Task<Tag> CreateTag(Guid userId, CreateTagDTO tagDto)
+    public async Task<Tag> CreateTag(Guid organisationId, Guid userId, CreateTagDTO tagDto)
     {
-        if (await _dbContext.Tags.AnyAsync(t => t.UserId == userId && t.Name == tagDto.Name))
+        if (await _dbContext.Tags.AnyAsync(t => t.OrganisationId == organisationId && t.Name == tagDto.Name))
         {
             throw new InvalidOperationException($"Tag with name '{tagDto.Name}' already exists.");
         }
@@ -52,6 +52,7 @@ public class TagService : ITagService
         {
             TagId = Guid.NewGuid(),
             UserId = userId,
+            OrganisationId = organisationId,
             Name = tagDto.Name
         };
         _dbContext.Tags.Add(tag);
@@ -59,9 +60,9 @@ public class TagService : ITagService
         return tag;
     }
 
-    public async Task UpdateTag(TagDTO tagDto)
+    public async Task UpdateTag(Guid organisationId, TagDTO tagDto)
     {
-        var tag = await _dbContext.Tags.FindAsync(tagDto.TagId);
+        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.TagId == tagDto.TagId && t.OrganisationId == organisationId);
         if (tag != null)
         {
             tag.Name = tagDto.Name;
@@ -69,9 +70,9 @@ public class TagService : ITagService
         }
     }
 
-    public async Task DeleteTag(Guid id)
+    public async Task DeleteTag(Guid organisationId, Guid id)
     {
-        var tag = await _dbContext.Tags.FindAsync(id);
+        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.TagId == id && t.OrganisationId == organisationId);
         if (tag != null)
         {
             _dbContext.Tags.Remove(tag);

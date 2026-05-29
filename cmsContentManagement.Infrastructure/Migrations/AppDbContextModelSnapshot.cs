@@ -37,34 +37,6 @@ namespace cmsContentManagment.Infrastructure.Migrations
                     b.ToTable("ContentTag");
                 });
 
-            modelBuilder.Entity("cmsContentManagement.Domain.Entities.ApiKey", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("char(36)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ApiKeys");
-                });
-
             modelBuilder.Entity("cmsContentManagement.Domain.Entities.Category", b =>
                 {
                     b.Property<Guid>("CategoryId")
@@ -78,6 +50,9 @@ namespace cmsContentManagment.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("char(36)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");
@@ -101,6 +76,9 @@ namespace cmsContentManagment.Infrastructure.Migrations
 
                     b.Property<DateTime>("CreatedOn")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("char(36)");
 
                     b.Property<string>("RichContent")
                         .HasColumnType("longtext");
@@ -138,6 +116,9 @@ namespace cmsContentManagment.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("char(36)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");

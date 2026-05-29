@@ -14,6 +14,9 @@ public class Category
     public string? Description { get; set; }
 
     [Required]
+    public Guid OrganisationId { get; set; }
+    
+    [Required]
     public Guid UserId { get; set; }
     
     // Navigation property

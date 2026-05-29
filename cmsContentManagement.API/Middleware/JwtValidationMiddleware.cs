@@ -2,9 +2,9 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using cmsContentManagement.Application.Common.Settings;
-using cmsContentManagement.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -16,16 +16,18 @@ public class JwtValidationMiddleware
     private readonly JwtSettings _jwtSettings;
     private readonly ILogger<JwtValidationMiddleware> _logger;
     private readonly RequestDelegate _next;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public JwtValidationMiddleware(RequestDelegate next, ILogger<JwtValidationMiddleware> logger,
-        IOptions<JwtSettings> jwtSettings)
+        IOptions<JwtSettings> jwtSettings, IHttpClientFactory httpClientFactory)
     {
         _next = next;
         _logger = logger;
         _jwtSettings = jwtSettings.Value;
+        _httpClientFactory = httpClientFactory;
     }
 
-    public async Task InvokeAsync(HttpContext context, IApiKeyService apiKeyService)
+    public async Task InvokeAsync(HttpContext context)
     {
         if (context.Request.Path.StartsWithSegments("/swagger"))
         {
@@ -42,45 +44,12 @@ public class JwtValidationMiddleware
 
         if (context.Request.Path.StartsWithSegments("/api/public/content"))
         {
-            string? apiKeyHeader = context.Request.Headers["X-Api-Key"].FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(apiKeyHeader))
-            {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsync("API Key is required for public content.");
-                return;
-            }
-
-            var apiKey = await apiKeyService.ValidateApiKeyAsync(apiKeyHeader);
-            if (apiKey == null)
-            {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsync("Invalid API Key.");
-                return;
-            }
-
-            if (!HttpMethods.IsGet(context.Request.Method))
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await context.Response.WriteAsync("API Key can only be used for GET requests.");
-                return;
-            }
-
-            var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.NameIdentifier, apiKey.UserId.ToString()),
-                new Claim(ClaimTypes.Role, "ApiReader")
-            };
-
-            var identity = new ClaimsIdentity(claims, "ApiKey");
-            context.User = new ClaimsPrincipal(identity);
-            
             await _next(context);
             return;
         }
 
         string? authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-        
+
         if (string.IsNullOrWhiteSpace(authHeader) || !authHeader.StartsWith("Bearer "))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -111,25 +80,67 @@ public class JwtValidationMiddleware
                 tokenHandler.ValidateToken(token, validationParameters, out SecurityToken validatedToken);
 
             context.User = principal;
-
-            await _next(context);
         }
         catch (SecurityTokenExpiredException)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Token expired.");
+            return;
         }
         catch (SecurityTokenException ex)
         {
             _logger.LogWarning(ex, "JWT validation failed.");
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Invalid JWT token.");
+            return;
         }
-        catch (Exception ex)
+
+        bool isWriteOperation = context.Request.Method == HttpMethods.Post
+            || context.Request.Method == HttpMethods.Put
+            || context.Request.Method == HttpMethods.Delete;
+
+        if (isWriteOperation)
         {
-            _logger.LogError(ex, "Unexpected error during JWT validation.");
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await context.Response.WriteAsync("Internal server error.");
+            var routeData = context.GetRouteData();
+            if (routeData.Values.TryGetValue("organisationId", out var orgIdValue) && orgIdValue != null)
+            {
+                try
+                {
+                    var client = _httpClientFactory.CreateClient();
+                    client.DefaultRequestHeaders.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+                    var roleResponse = await client.GetAsync(
+                        $"{_jwtSettings.CmsOrgUrl}/organisations/{orgIdValue}/role");
+
+                    if (!roleResponse.IsSuccessStatusCode)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        await context.Response.WriteAsync("Could not verify organisation role.");
+                        return;
+                    }
+
+                    var roleJson = await roleResponse.Content.ReadAsStringAsync();
+                    var roleDoc = System.Text.Json.JsonDocument.Parse(roleJson);
+                    var role = roleDoc.RootElement.GetProperty("role").GetString();
+
+                    if (role != "Admin" && role != "Editor")
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        await context.Response.WriteAsync("Editor or Admin role required.");
+                        return;
+                    }
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogError(ex, "cmsorg service unreachable at {CmsOrgUrl}.", _jwtSettings.CmsOrgUrl);
+                    context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                    await context.Response.WriteAsync("Organisation service unavailable.");
+                    return;
+                }
+            }
         }
+
+        await _next(context);
     }
 }

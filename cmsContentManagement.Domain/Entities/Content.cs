@@ -17,6 +17,9 @@ public class Content
     public DateTime UpdatedOn { get; set; } = DateTime.UtcNow;
 
     [Required]
+    public Guid OrganisationId { get; set; }
+    
+    [Required]
     public Guid UserId { get; set; }
     
     public Guid? CategoryId { get; set; }

@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace cmsContentManagement.API.Controllers;
 
 [ApiController]
-[Route("entry")]
+[Route("{organisationId}/entry")]
 [Authorize]
 public class ContentManagementController : ControllerBase
 {
@@ -22,15 +22,15 @@ public class ContentManagementController : ControllerBase
     }
 
     [HttpGet("{contentId}")]
-    public async Task<ActionResult<ContentDTO>> GetContent(Guid contentId)
+    public async Task<ActionResult<ContentDTO>> GetContent(Guid organisationId, Guid contentId)
     {
-        var content = await _contentManagmentService.getContentById(User.GetUserId(), contentId);
-        if (content == null) return NotFound();
+        var content = await _contentManagmentService.getContentById(organisationId, contentId, User.GetUserId());
         return Ok(MapToDto(content));
     }
 
     [HttpGet]
     public async Task<List<ContentDTO>> FilterContents(
+        Guid organisationId,
         [FromQuery] string? query,
         [FromQuery] string? tag,
         [FromQuery] string? category,
@@ -42,34 +42,34 @@ public class ContentManagementController : ControllerBase
         [FromQuery] bool withElastic = false
     )
     {
-        return await _contentManagmentService.FilterContents(User.GetUserId(), query, tag, category, status, fromDate, toDate, page, pageSize, withElastic);
+        return await _contentManagmentService.FilterContents(organisationId, query, tag, category, status, fromDate, toDate, page, pageSize, withElastic);
     }
 
     [HttpPut("{contentId}")]
-    public async Task<IActionResult> UpdateContent(Guid contentId, [FromBody] SaveContentDTO content)
+    public async Task<IActionResult> UpdateContent(Guid organisationId, Guid contentId, [FromBody] SaveContentDTO content)
     {
-        await _contentManagmentService.UpdateContent(User.GetUserId(), contentId, content);
+        await _contentManagmentService.UpdateContent(organisationId, contentId, content);
         return Ok();
     }
 
     [HttpPost("{contentId}/unpublish")]
-    public async Task<IActionResult> UnpublishContent(Guid contentId)
+    public async Task<IActionResult> UnpublishContent(Guid organisationId, Guid contentId)
     {
-        await _contentManagmentService.UnpublishContent(User.GetUserId(), contentId);
+        await _contentManagmentService.UnpublishContent(organisationId, contentId);
         return Ok();
     }
 
     [HttpDelete("{contentId}")]
-    public async Task<IActionResult> DeleteContent(Guid contentId)
+    public async Task<IActionResult> DeleteContent(Guid organisationId, Guid contentId)
     {
-        await _contentManagmentService.DeleteContent(User.GetUserId(), contentId);
+        await _contentManagmentService.DeleteContent(organisationId, contentId);
         return Ok();
     }
 
     [HttpGet("new-id")]
-    public async Task<ActionResult<Guid>> GenerateNewContentId()
+    public async Task<ActionResult<Guid>> GenerateNewContentId(Guid organisationId)
     {
-        var id = await _contentManagmentService.GenerateNewContentId(User.GetUserId());
+        var id = await _contentManagmentService.GenerateNewContentId(organisationId, User.GetUserId());
         return Ok(id);
     }
 
@@ -83,7 +83,7 @@ public class ContentManagementController : ControllerBase
             Title = content.Title,
             Slug = content.Slug,
             RichContent = content.RichContent,
-            UserId = content.UserId,
+            OrganisationId = content.OrganisationId,
             CategoryId = content.CategoryId,
             CategoryName = content.Category?.Name,
             CreatedOn = content.CreatedOn,

@@ -10,6 +10,7 @@ COPY cmsContentManagement.API/*.csproj ./cmsContentManagement.API/
 COPY cmsContentManagement.Application/*.csproj ./cmsContentManagement.Application/
 COPY cmsContentManagement.Infrastructure/*.csproj ./cmsContentManagement.Infrastructure/
 COPY cmsContentManagement.Domain/*.csproj ./cmsContentManagement.Domain/
+COPY cmsContentManagement.Tests/*.csproj ./cmsContentManagement.Tests/
 
 # Restore NuGet packages for the entire solution.
 RUN dotnet restore "./cmsContentManagement.sln"

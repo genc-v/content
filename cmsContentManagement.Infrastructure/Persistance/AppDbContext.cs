@@ -11,7 +11,6 @@ public class AppDbContext : DbContext
     public virtual DbSet<Content> Contents { get; set; }
     public virtual DbSet<Category> Categories { get; set; }
     public virtual DbSet<Tag> Tags { get; set; }
-    public virtual DbSet<ApiKey> ApiKeys { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

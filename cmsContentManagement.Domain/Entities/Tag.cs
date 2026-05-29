@@ -12,6 +12,9 @@ public class Tag
     public string Name { get; set; } = string.Empty;
 
     [Required]
+    public Guid OrganisationId { get; set; }
+    
+    [Required]
     public Guid UserId { get; set; }
     
     // Navigation property

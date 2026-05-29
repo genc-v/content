@@ -10,7 +10,7 @@ public class PublicContentDTO
     public string? Status { get; set; }
     public DateTime CreatedOn { get; set; }
     public DateTime UpdatedOn { get; set; }
-    public Guid UserId { get; set; }
+    public Guid OrganisationId { get; set; }
     
     public CategoryDTO? Category { get; set; }
     public List<TagDTO> Tags { get; set; } = new List<TagDTO>();

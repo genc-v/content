@@ -12,8 +12,8 @@ using cmsContentManagment.Infrastructure.Persistance;
 namespace cmsContentManagment.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260107215750_AddApiKeyEntity")]
-    partial class AddApiKeyEntity
+    [Migration("20260422105224_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -40,34 +40,6 @@ namespace cmsContentManagment.Infrastructure.Migrations
                     b.ToTable("ContentTag");
                 });
 
-            modelBuilder.Entity("cmsContentManagement.Domain.Entities.ApiKey", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("char(36)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ApiKeys");
-                });
-
             modelBuilder.Entity("cmsContentManagement.Domain.Entities.Category", b =>
                 {
                     b.Property<Guid>("CategoryId")
@@ -81,6 +53,12 @@ namespace cmsContentManagment.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
 
                     b.HasKey("CategoryId");
 
@@ -99,7 +77,16 @@ namespace cmsContentManagment.Infrastructure.Migrations
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("char(36)");
 
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("char(36)");
+
                     b.Property<string>("RichContent")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Slug")
                         .HasColumnType("longtext");
 
                     b.Property<string>("Status")
@@ -108,6 +95,9 @@ namespace cmsContentManagment.Infrastructure.Migrations
 
                     b.Property<string>("Title")
                         .HasColumnType("longtext");
+
+                    b.Property<DateTime>("UpdatedOn")
+                        .HasColumnType("datetime(6)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");
@@ -129,6 +119,12 @@ namespace cmsContentManagment.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
 
                     b.HasKey("TagId");
 

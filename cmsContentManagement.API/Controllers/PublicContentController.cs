@@ -25,15 +25,14 @@ public class PublicContentController : ControllerBase
         [FromQuery] DateTime? toDate,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
-        [FromQuery] bool withElastic = false,
-        [FromHeader(Name = "X-Api-Key")] string? apiKey = null)
+        [FromQuery] bool withElastic = false)
     {
-        return await _contentManagmentService.GetPublicContents(query, tag, category, fromDate, toDate, page, pageSize, withElastic, apiKey);
+        return await _contentManagmentService.GetPublicContents(query, tag, category, fromDate, toDate, page, pageSize, withElastic);
     }
 
     [HttpGet("{slug}")]
-    public async Task<PublicContentDTO> GetContentBySlug(string slug, [FromHeader(Name = "X-Api-Key")] string apiKey)
+    public async Task<PublicContentDTO> GetContentBySlug(string slug)
     {
-        return await _contentManagmentService.GetPublicContentBySlug(slug, apiKey);
+        return await _contentManagmentService.GetPublicContentBySlug(slug);
     }
 }

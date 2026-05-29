@@ -1,4 +1,4 @@
-﻿version: '3.9'
+version: '3.9'
 services:
   cmscontentmanagement:
     build:
@@ -15,13 +15,16 @@ services:
       KafkaSettings__BootstrapServers: 'kafka:9092'
       KafkaSettings__Topic: 'files.uploaded'
       Redis__Connection: 'redis:6379'
-      ElasticSettings__Url: 'http://elasticsearch:9200'
+      JwtSettings__CmsOrgUrl: 'http://host.docker.internal:5059'
+      # ElasticSettings__Url: 'http://elasticsearch:9200'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - '5054:8080'
     networks:
       - cmscontentnetwork
       - kafka-net
-      - elastic
+      # - elastic
 
   mysql:
     image: mysql:8.0
@@ -46,28 +49,28 @@ services:
     networks:
       - cmscontentnetwork
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
-    container_name: elasticsearch
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-    ports:
-      - '9200:9200'
-    networks:
-      - elastic
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.1
-    container_name: kibana
-    ports:
-      - '5601:5601'
-    depends_on:
-      - elasticsearch
-    environment:
-      - 'ELASTICSEARCH_HOSTS=http://elasticsearch:9200'
-    networks:
-      - elastic
+#  elasticsearch:
+#    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+#    container_name: elasticsearch
+#    environment:
+#      - discovery.type=single-node
+#      - xpack.security.enabled=false
+#    ports:
+#      - '9200:9200'
+#    networks:
+#      - elastic
+#
+#  kibana:
+#    image: docker.elastic.co/kibana/kibana:8.11.1
+#    container_name: kibana
+#    ports:
+#      - '5601:5601'
+#    depends_on:
+#      - elasticsearch
+#    environment:
+#      - 'ELASTICSEARCH_HOSTS=http://elasticsearch:9200'
+#    networks:
+#      - elastic
 
 volumes:
   mysql-data:
@@ -79,5 +82,5 @@ networks:
   kafka-net:
     external: true
     name: nest-s3-kafka_default
-  elastic:
-    driver: bridge
+  # elastic:
+  #   driver: bridge

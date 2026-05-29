@@ -1,5 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+ dotnet test --logger "console;verbosity=detailed"# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "cmsContentManagement.API", "cmsContentManagement.API\cmsContentManagement.API.csproj", "{F629CDB0-3BFC-451F-A9CC-F6D675EB3BCE}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{78D40D56-7083-4BEC-AC25-812F24E28250}"
@@ -12,6 +13,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "cmsContentManagement.Infrastructure", "cmsContentManagement.Infrastructure\cmsContentManagement.Infrastructure.csproj", "{25E89CC4-1BB4-4915-9F86-5ADE5072821B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "cmsContentManagement.Application", "cmsContentManagement.Application\cmsContentManagement.Application.csproj", "{A227CFD6-7C97-43EC-A969-8704D89E6C07}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "cmsContentManagement.Tests", "cmsContentManagement.Tests\cmsContentManagement.Tests.csproj", "{E1B22F0E-9B3F-4232-B035-B749598189DD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -35,5 +38,9 @@ Global
 		{A227CFD6-7C97-43EC-A969-8704D89E6C07}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A227CFD6-7C97-43EC-A969-8704D89E6C07}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A227CFD6-7C97-43EC-A969-8704D89E6C07}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E1B22F0E-9B3F-4232-B035-B749598189DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E1B22F0E-9B3F-4232-B035-B749598189DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E1B22F0E-9B3F-4232-B035-B749598189DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E1B22F0E-9B3F-4232-B035-B749598189DD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

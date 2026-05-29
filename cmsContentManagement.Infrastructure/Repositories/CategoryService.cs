@@ -15,9 +15,9 @@ public class CategoryService : ICategoryService
         _dbContext = dbContext;
     }
 
-    public async Task<List<CategoryResponseDTO>> GetAllCategories(Guid userId, int page, int pageSize, string? searchTerm = null)
+    public async Task<List<CategoryResponseDTO>> GetAllCategories(Guid organisationId, int page, int pageSize, string? searchTerm = null)
     {
-        var query = _dbContext.Categories.Where(c => c.UserId == userId).AsQueryable();
+        var query = _dbContext.Categories.Where(c => c.OrganisationId == organisationId).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
@@ -41,9 +41,9 @@ public class CategoryService : ICategoryService
         return await _dbContext.Categories.FindAsync(id);
     }
 
-    public async Task<Category> CreateCategory(Guid userId, CreateCategoryDTO categoryDto)
+    public async Task<Category> CreateCategory(Guid organisationId, Guid userId, CreateCategoryDTO categoryDto)
     {
-        if (await _dbContext.Categories.AnyAsync(c => c.UserId == userId && c.Name == categoryDto.Name))
+        if (await _dbContext.Categories.AnyAsync(c => c.OrganisationId == organisationId && c.Name == categoryDto.Name))
         {
             throw new InvalidOperationException($"Category with name '{categoryDto.Name}' already exists.");
         }
@@ -52,6 +52,7 @@ public class CategoryService : ICategoryService
         {
             CategoryId = Guid.NewGuid(),
             UserId = userId,
+            OrganisationId = organisationId,
             Name = categoryDto.Name,
             Description = categoryDto.Description
         };
@@ -60,9 +61,9 @@ public class CategoryService : ICategoryService
         return category;
     }
 
-    public async Task UpdateCategory(CategoryDTO categoryDto)
+    public async Task UpdateCategory(Guid organisationId, CategoryDTO categoryDto)
     {
-        var category = await _dbContext.Categories.FindAsync(categoryDto.CategoryId);
+        var category = await _dbContext.Categories.FirstOrDefaultAsync(c => c.CategoryId == categoryDto.CategoryId && c.OrganisationId == organisationId);
         if (category != null)
         {
             category.Name = categoryDto.Name;
@@ -71,9 +72,9 @@ public class CategoryService : ICategoryService
         }
     }
 
-    public async Task DeleteCategory(Guid id)
+    public async Task DeleteCategory(Guid organisationId, Guid id)
     {
-        var category = await _dbContext.Categories.FindAsync(id);
+        var category = await _dbContext.Categories.FirstOrDefaultAsync(c => c.CategoryId == id && c.OrganisationId == organisationId);
         if (category != null)
         {
             _dbContext.Categories.Remove(category);

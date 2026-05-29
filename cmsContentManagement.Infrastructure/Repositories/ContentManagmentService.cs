@@ -23,29 +23,27 @@ public class ContentManagmentService : IContentManagmentService
     private readonly ElasticsearchClient _elasticClient;
     private readonly ElasticSettings _elasticSettings;
     private readonly ILogger<ContentManagmentService> _logger;
-    private readonly IApiKeyService _apiKeyService;
 
     public ContentManagmentService(
         AppDbContext dbContext,
         ElasticsearchClient elasticClient,
         IOptions<ElasticSettings> elasticOptions,
-        ILogger<ContentManagmentService> logger,
-        IApiKeyService apiKeyService)
+        ILogger<ContentManagmentService> logger)
     {
         _dbContext = dbContext;
         _elasticClient = elasticClient;
         _logger = logger;
         _elasticSettings = elasticOptions.Value;
-        _apiKeyService = apiKeyService;
     }
 
-    public async Task<Guid> GenerateNewContentId(Guid userId)
+    public async Task<Guid> GenerateNewContentId(Guid organisationId, Guid userId)
     {
-        var content = await _dbContext.Contents.FirstOrDefaultAsync(e => e.UserId == userId && e.Status == "New");
+        var content = await _dbContext.Contents.FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.UserId == userId && e.Status == "New");
         if (content != null) return content.ContentId;
 
         content = new Content
         {
+            OrganisationId = organisationId,
             UserId = userId
         };
 
@@ -56,17 +54,20 @@ public class ContentManagmentService : IContentManagmentService
         return content.ContentId;
     }
 
-    public async Task<Content> getContentById(Guid userId, Guid contentId)
+    public async Task<Content> getContentById(Guid organisationId, Guid contentId, Guid userId)
     {
         var content = await _dbContext.Contents
-            .FirstOrDefaultAsync(e => e.UserId == userId && e.ContentId == contentId);
-        
+            .Include(c => c.Category)
+            .Include(c => c.Tags)
+            .FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.ContentId == contentId);
+
         if (content == null) throw GeneralErrorCodes.NotFound;
+        if (content.UserId != userId) throw GeneralErrorCodes.PermissionDenied;
 
         return content;
     }
 
-    public async Task<List<ContentDTO>> FilterContents(Guid userId, string? query, string? tag, string? category, string? status, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = false)
+    public async Task<List<ContentDTO>> FilterContents(Guid organisationId, string? query, string? tag, string? category, string? status, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = false)
     {
         if (withElastic)
         {
@@ -80,7 +81,7 @@ public class ContentManagmentService : IContentManagmentService
                     {
                         var must = new List<Action<QueryDescriptor<Content>>>();
 
-                        must.Add(m => m.Term(t => t.Field(f => f.UserId.Suffix("keyword")).Value(userId.ToString())));
+                        must.Add(m => m.Term(t => t.Field(f => f.OrganisationId.Suffix("keyword")).Value(organisationId.ToString())));
                         b.MustNot(mn => mn.Term(t => t.Field(f => f.Status.Suffix("keyword")).Value("Deleted")));
 
                         if (!string.IsNullOrWhiteSpace(query))
@@ -132,7 +133,7 @@ public class ContentManagmentService : IContentManagmentService
                     Title = c.Title,
                     RichContent = c.RichContent,
                     Slug = c.Slug,
-                    UserId = c.UserId,
+                    OrganisationId = c.OrganisationId,
                     CategoryId = c.CategoryId,
                     CategoryName = c.Category?.Name,
                     CreatedOn = c.CreatedOn,
@@ -140,14 +141,14 @@ public class ContentManagmentService : IContentManagmentService
                     Tags = c.Tags?.Select(t => new TagDTO { TagId = t.TagId, Name = t.Name }).ToList() ?? new List<TagDTO>()
                 }).ToList();
             }
-            
+
             _logger.LogError("Elastic search failed: {Reason}", response.DebugInformation);
         }
 
         var queryable = _dbContext.Contents
             .Include(c => c.Category)
             .Include(c => c.Tags)
-            .Where(e => e.UserId == userId && e.Status != "Deleted");
+            .Where(e => e.OrganisationId == organisationId && e.Status != "Deleted");
 
         if (!string.IsNullOrWhiteSpace(query))
         {
@@ -193,7 +194,7 @@ public class ContentManagmentService : IContentManagmentService
             Title = c.Title,
             RichContent = c.RichContent,
             Slug = c.Slug,
-            UserId = c.UserId,
+            OrganisationId = c.OrganisationId,
             CategoryId = c.CategoryId,
             CategoryName = c.Category?.Name,
             CreatedOn = c.CreatedOn,
@@ -202,9 +203,9 @@ public class ContentManagmentService : IContentManagmentService
         }).ToList();
     }
 
-    public async Task DeleteContent(Guid userId, Guid contentId)
+    public async Task DeleteContent(Guid organisationId, Guid contentId)
     {
-        var content = await _dbContext.Contents.FirstOrDefaultAsync(e => e.UserId == userId && e.ContentId == contentId);
+        var content = await _dbContext.Contents.FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.ContentId == contentId);
         if (content == null) throw GeneralErrorCodes.NotFound;
 
         content.Status = "Deleted";
@@ -212,13 +213,13 @@ public class ContentManagmentService : IContentManagmentService
         await RemoveContentFromIndexAsync(contentId);
     }
 
-    public async Task UpdateContent(Guid userId, Guid contentId, SaveContentDTO content)
+    public async Task UpdateContent(Guid organisationId, Guid contentId, SaveContentDTO content)
     {
         var contentToBeUpdated = await _dbContext.Contents
             .Include(c => c.Tags)
             .Include(c => c.Category)
-            .FirstOrDefaultAsync(e => e.UserId == userId && e.ContentId == contentId);
-        
+            .FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.ContentId == contentId);
+
         if (contentToBeUpdated == null) throw GeneralErrorCodes.NotFound;
 
         await DoSaveContent(contentToBeUpdated, content);
@@ -238,7 +239,7 @@ public class ContentManagmentService : IContentManagmentService
                 var generatedSlug = $"/{slugTitle}";
 
                 var exists = await _dbContext.Contents.AnyAsync(c =>
-                    c.UserId == contentToBeUpdated.UserId
+                    c.OrganisationId == contentToBeUpdated.OrganisationId
                     && c.ContentId != contentToBeUpdated.ContentId
                     && c.Status != "Deleted"
                     && (c.Title == content.Title || c.Slug == generatedSlug)
@@ -257,7 +258,7 @@ public class ContentManagmentService : IContentManagmentService
             if (!string.IsNullOrWhiteSpace(content.Title))
             {
                 var titleExists = await _dbContext.Contents.AnyAsync(c =>
-                    c.UserId == contentToBeUpdated.UserId
+                    c.OrganisationId == contentToBeUpdated.OrganisationId
                     && c.ContentId != contentToBeUpdated.ContentId
                     && c.Status != "Deleted"
                     && c.Title == content.Title
@@ -273,16 +274,15 @@ public class ContentManagmentService : IContentManagmentService
         contentToBeUpdated.RichContent = content.RichContent;
 
         contentToBeUpdated.AssetUrl = content.AssetUrl;
-        
+
         bool canBePublished = true;
 
         if (content.CategoryId.HasValue)
         {
-            var category = await _dbContext.Categories.FirstOrDefaultAsync(c => c.CategoryId == content.CategoryId.Value && c.UserId == contentToBeUpdated.UserId);
+            var category = await _dbContext.Categories.FirstOrDefaultAsync(c => c.CategoryId == content.CategoryId.Value && c.OrganisationId == contentToBeUpdated.OrganisationId);
             if (category == null)
             {
                canBePublished = false;
-               // throw new Exception($"Category with ID '{content.CategoryId}' does not exist."); 
             }
             contentToBeUpdated.Category = category;
         }
@@ -296,45 +296,46 @@ public class ContentManagmentService : IContentManagmentService
         {
             foreach (var tagDto in content.Tags)
             {
-                var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.TagId == tagDto.TagId && t.UserId == contentToBeUpdated.UserId);
+                var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.TagId == tagDto.TagId && t.OrganisationId == contentToBeUpdated.OrganisationId);
                 if (tag == null)
                 {
                    canBePublished = false;
-                   // throw new Exception($"Tag with ID '{tagDto.TagId}' does not exist.");
                 }
-                else 
+                else
                 {
                     contentToBeUpdated.Tags.Add(tag);
                 }
             }
         }
 
-        if (content.Status == "Published")
-        {
-             if (canBePublished && !string.IsNullOrWhiteSpace(contentToBeUpdated.Title) && !string.IsNullOrWhiteSpace(contentToBeUpdated.RichContent) && contentToBeUpdated.CategoryId != null)
-             {
-                 contentToBeUpdated.Status = "Published";
-             }
-             else
-             {
-                 contentToBeUpdated.Status = "Draft";
-             }
-        }
-        else
-        {
-             contentToBeUpdated.Status = "Draft";
-        }     
+        UpdateStatusBasedOnCompleteness(contentToBeUpdated, canBePublished);
 
         await _dbContext.SaveChangesAsync();
         await IndexContentAsync(contentToBeUpdated);
     }
 
-    public async Task UnpublishContent(Guid userId, Guid contentId)
+    private void UpdateStatusBasedOnCompleteness(Content content, bool additionalCriteria = true)
+    {
+        if (content.Status == "Deleted")
+        {
+            return;
+        }
+
+        bool isComplete = additionalCriteria &&
+                         !string.IsNullOrWhiteSpace(content.Title) &&
+                         !string.IsNullOrWhiteSpace(content.RichContent) &&
+                         content.CategoryId != null &&
+                         !string.IsNullOrWhiteSpace(content.AssetUrl);
+
+        content.Status = isComplete ? "Published" : "Draft";
+    }
+
+    public async Task UnpublishContent(Guid organisationId, Guid contentId)
     {
         var content = await _dbContext.Contents
             .Include(c => c.Category)
             .Include(c => c.Tags)
-            .FirstOrDefaultAsync(e => e.UserId == userId && e.ContentId == contentId);
+            .FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.ContentId == contentId);
         if (content == null) throw GeneralErrorCodes.NotFound;
 
         content.Status = "Unpublished";
@@ -342,15 +343,16 @@ public class ContentManagmentService : IContentManagmentService
         await IndexContentAsync(content);
     }
 
-    public async Task AddAssetUrlToContent(Guid userId, Guid contentId, string assetUrl)
+    public async Task AddAssetUrlToContent(Guid organisationId, Guid contentId, string assetUrl)
     {
         var content = await _dbContext.Contents
             .Include(c => c.Category)
             .Include(c => c.Tags)
-            .FirstOrDefaultAsync(e => e.UserId == userId && e.ContentId == contentId);
+            .FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.ContentId == contentId);
         if (content == null) throw GeneralErrorCodes.NotFound;
 
         content.AssetUrl = assetUrl;
+        UpdateStatusBasedOnCompleteness(content);
 
         await _dbContext.SaveChangesAsync();
         await IndexContentAsync(content);
@@ -365,28 +367,14 @@ public class ContentManagmentService : IContentManagmentService
         if (content == null) throw GeneralErrorCodes.NotFound;
 
         content.AssetUrl = assetUrl;
-
-        if (content.Status == "New")
-        {
-            content.Status = "Draft";
-        }
+        UpdateStatusBasedOnCompleteness(content);
 
         await _dbContext.SaveChangesAsync();
         await IndexContentAsync(content);
     }
 
-    public async Task<List<PublicContentDTO>> GetPublicContents(string? query, string? tag, string? category, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = false, string? apiKey = null)
+    public async Task<List<PublicContentDTO>> GetPublicContents(string? query, string? tag, string? category, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = false, Guid? organisationId = null)
     {
-        Guid? userId = null;
-        if (!string.IsNullOrWhiteSpace(apiKey))
-        {
-            var key = await _apiKeyService.ValidateApiKeyAsync(apiKey);
-            if (key != null)
-            {
-                userId = key.UserId;
-            }
-        }
-
         if (withElastic)
         {
             var response = await _elasticClient.SearchAsync<Content>(s => s
@@ -401,9 +389,9 @@ public class ContentManagmentService : IContentManagmentService
 
                         must.Add(m => m.Term(t => t.Field(f => f.Status.Suffix("keyword")).Value("Published")));
 
-                        if (userId.HasValue)
+                        if (organisationId.HasValue)
                         {
-                            must.Add(m => m.Term(t => t.Field(f => f.UserId.Suffix("keyword")).Value(userId.Value.ToString())));
+                            must.Add(m => m.Term(t => t.Field(f => f.OrganisationId.Suffix("keyword")).Value(organisationId.Value.ToString())));
                         }
 
                         if (!string.IsNullOrWhiteSpace(query))
@@ -451,7 +439,7 @@ public class ContentManagmentService : IContentManagmentService
                     Status = c.Status,
                     CreatedOn = c.CreatedOn,
                     UpdatedOn = c.UpdatedOn,
-                    UserId = c.UserId,
+                    OrganisationId = c.OrganisationId,
                     Category = c.Category == null ? null : new CategoryDTO
                     {
                         CategoryId = c.Category.CategoryId,
@@ -473,6 +461,11 @@ public class ContentManagmentService : IContentManagmentService
             .Include(c => c.Category)
             .Include(c => c.Tags)
             .Where(c => c.Status == "Published");
+
+        if (organisationId.HasValue)
+        {
+            queryable = queryable.Where(c => c.OrganisationId == organisationId.Value);
+        }
 
         if (!string.IsNullOrWhiteSpace(query))
         {
@@ -499,11 +492,6 @@ public class ContentManagmentService : IContentManagmentService
             queryable = queryable.Where(c => c.CreatedOn <= toDate.Value);
         }
 
-        if (userId.HasValue)
-        {
-            queryable = queryable.Where(c => c.UserId == userId.Value);
-        }
-
         return await queryable
             .OrderByDescending(c => c.CreatedOn)
             .Skip((page - 1) * pageSize)
@@ -517,7 +505,7 @@ public class ContentManagmentService : IContentManagmentService
                 Status = c.Status,
                 CreatedOn = c.CreatedOn,
                 UpdatedOn = c.UpdatedOn,
-                UserId = c.UserId,
+                OrganisationId = c.OrganisationId,
                 Category = c.Category == null ? null : new CategoryDTO
                 {
                     CategoryId = c.Category.CategoryId,
@@ -545,8 +533,7 @@ public class ContentManagmentService : IContentManagmentService
                 content.Status,
                 content.CreatedOn,
                 content.UpdatedOn,
-                
-                content.UserId,
+                content.OrganisationId,
                 CategoryId = content.CategoryId,
                 Category = content.Category == null ? null : new { content.Category.CategoryId, content.Category.Name, content.Category.Description },
                 Tags = content.Tags.Select(t => new { t.TagId, t.Name })
@@ -584,20 +571,20 @@ public class ContentManagmentService : IContentManagmentService
         }
     }
 
-    public async Task<PublicContentDTO> GetPublicContentBySlug(string slug, string apiKey)
+    public async Task<PublicContentDTO> GetPublicContentBySlug(string slug, Guid? organisationId = null)
     {
-        var key = await _apiKeyService.ValidateApiKeyAsync(apiKey);
-        if (key == null) throw GeneralErrorCodes.InvalidApiKey;
+        var queryable = _dbContext.Contents
+            .Include(c => c.Category)
+            .Include(c => c.Tags)
+            .Where(c => c.Slug == slug && c.Status == "Published");
 
-        var content = await _dbContext.Contents
-            .FirstOrDefaultAsync(c => c.Slug == slug && c.Status == "Published");
-
-        if (content == null) throw GeneralErrorCodes.NotFound;
-        
-        if (content.UserId != key.UserId)
+        if (organisationId.HasValue)
         {
-             throw GeneralErrorCodes.NotFound;
+            queryable = queryable.Where(c => c.OrganisationId == organisationId.Value);
         }
+
+        var content = await queryable.FirstOrDefaultAsync();
+        if (content == null) throw GeneralErrorCodes.NotFound;
 
         return new PublicContentDTO
         {
@@ -609,7 +596,7 @@ public class ContentManagmentService : IContentManagmentService
             Status = content.Status,
             CreatedOn = content.CreatedOn,
             UpdatedOn = content.UpdatedOn,
-            UserId = content.UserId,
+            OrganisationId = content.OrganisationId,
             Category = content.Category == null ? null : new CategoryDTO
             {
                 CategoryId = content.Category.CategoryId,

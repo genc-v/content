@@ -56,7 +56,4 @@ public class GeneralErrorCodes : Exception
 
     public static GeneralErrorCodes TagNotFound(string tagName)
         => new(16, $"Tag '{tagName}' does not exist.");
-
-    public static GeneralErrorCodes InvalidApiKey
-        => new(17, "Invalid API Key");
 }
