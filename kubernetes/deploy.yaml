@@ -24,7 +24,7 @@ spec:
               protocol: TCP
           env:
             - name: ConnectionStrings__DefaultConnection
-              value: "Server=mysql;Database=auth;Uid=user;Pwd=alskjdfa@alskdjfAAAb12;"
+              value: "Server=57.129.78.173;Port=30737;Database=cmsorg;Uid=cmsorg;Pwd=cmsorg_pass;CharSet=utf8mb4;"
             
             - name: Redis__Connection
               value: "redis:6379"
