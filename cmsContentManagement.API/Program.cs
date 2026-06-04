@@ -4,6 +4,8 @@ using cmsContentManagement.Middleware;
 using cmsContentManagement.API.Middleware;
 using cmsContentManagment.Infrastructure.Persistance;
 using cmsContentManagment.Infrastructure.Repositories;
+using cmsContentManagment.Infrastructure.Caching;
+using cmsContentManagement.API.Services;
 using cmsContentManagement.Infrastructure.Messaging;
 using Microsoft.OpenApi.Models;
 using Elastic.Clients.Elasticsearch;
@@ -48,10 +50,18 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString))
 );
 
+if (string.IsNullOrWhiteSpace(redisOptionsConfiguration))
+{
+    throw new InvalidOperationException("Redis:Connection is not configured");
+}
+
 builder.Services.AddStackExchangeRedisCache(redisOptions =>
 {
     redisOptions.Configuration = redisOptionsConfiguration;
 });
+
+builder.Services.Configure<CacheSettings>(builder.Configuration.GetSection("Cache"));
+builder.Services.AddSingleton<IContentCache, ContentCache>();
 
 builder.Services.Configure<ElasticSettings>(builder.Configuration.GetSection("ElasticSettings"));
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
@@ -86,6 +96,7 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
+builder.Services.AddScoped<IApiKeyValidator, ApiKeyValidator>();
 builder.Services.AddScoped<IContentManagmentService, ContentManagmentService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<ITagService, TagService>();

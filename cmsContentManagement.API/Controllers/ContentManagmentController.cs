@@ -39,7 +39,7 @@ public class ContentManagementController : ControllerBase
         [FromQuery] DateTime? toDate,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
-        [FromQuery] bool withElastic = false
+        [FromQuery] bool withElastic = true
     )
     {
         return await _contentManagmentService.FilterContents(organisationId, query, tag, category, status, fromDate, toDate, page, pageSize, withElastic);

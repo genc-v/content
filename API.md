@@ -21,7 +21,14 @@ A multi-tenant CMS backend built on .NET 8 (Clean Architecture). It manages:
 | Protected endpoints | `Authorization: Bearer <JWT>` |
 | Public endpoints | No auth (`/api/public/content/*`) |
 
-Write operations (`POST` / `PUT` / `DELETE`) on routes with `{organisationId}` require the caller's role to be **Editor** or **Admin**. Viewers receive `403`.
+All routes with `{organisationId}` enforce the caller's role against the sibling `cmsOrg` service (`GET /organisations/{id}/role`), using the same hierarchy (`Admin` > `Editor` > `Viewer`):
+
+| Operation | Minimum role |
+|---|---|
+| Reads (`GET` / `HEAD`) | **Viewer** |
+| Writes (`POST` / `PUT` / `PATCH` / `DELETE`) | **Editor** |
+
+Non-members and users below the required role receive `403`. If `cmsOrg` is unreachable or returns an unexpected payload, the request fails with `502`.
 
 ---
 
@@ -163,7 +170,7 @@ List content entries for an organisation with optional filtering, search, and pa
 | `toDate` | `DateTime?` | — | `CreatedOn <= value` |
 | `page` | `int` | `1` | |
 | `pageSize` | `int` | `25` | |
-| `withElastic` | `bool` | `false` | Use Elasticsearch (fuzziness=7) instead of DB |
+| `withElastic` | `bool` | `true` | Use Elasticsearch (fuzziness=2) instead of DB; falls back to DB if Elastic is unavailable |
 
 **Returns:** `200 OK` — `List<ContentDTO>` ordered by `CreatedOn` descending. `Deleted` entries are never included.
 
@@ -351,19 +358,56 @@ List all published content across all organisations.
 | `toDate` | `DateTime?` | — | |
 | `page` | `int` | `1` | |
 | `pageSize` | `int` | `10` | |
-| `withElastic` | `bool` | `false` | |
+| `withElastic` | `bool` | `true` | Use Elasticsearch; falls back to DB if Elastic is unavailable |
 
 **Returns:** `200 OK` — `List<PublicContentDTO>` (only `Published` entries, ordered by `CreatedOn` desc)
 
 ---
 
-#### `GET api/public/content/{slug}`
+#### `POST api/public/content`
 
-Get a single published content entry by slug.
+Get a single published content entry by slug, scoped to the organisation that owns the API key.
+
+The API key is validated against cmsOrg (`GET {CmsOrgUrl}/api-keys/validate` with header `X-Api-Key`), which returns the owning `organisationId`; the slug is then resolved within that organisation.
+
+**Body:**
+```json
+{
+  "slug": "string",
+  "apiKey": "string"
+}
+```
 
 **Returns:** `200 OK` — `PublicContentDTO`
 
-**Errors:** `404` if no published entry matches the slug
+**Errors:** `400` missing slug or apiKey · `403` invalid API key · `404` no published entry matches the slug in that organisation · `503` cmsOrg unreachable
+
+---
+
+#### `POST api/public/search`
+
+Filtered search over published content, scoped to the organisation that owns the API key.
+
+The API key is validated against cmsOrg (`GET {CmsOrgUrl}/api-keys/validate` with header `X-Api-Key`), which returns the owning `organisationId`; results are filtered to that organisation only.
+
+**Body:**
+```json
+{
+  "apiKey": "string",
+  "query": "string?",
+  "tag": "string?",
+  "category": "string?",
+  "fromDate": "DateTime?",
+  "toDate": "DateTime?",
+  "page": 1,
+  "pageSize": 10,
+  "withElastic": true
+}
+```
+
+**Returns:** `200 OK` — `List<PublicContentDTO>` (only `Published` entries for the organisation, ordered by `CreatedOn` desc)
+
+**Errors:** `400` missing apiKey · `403` invalid API key · `503` cmsOrg unreachable
 
 ---
 

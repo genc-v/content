@@ -42,7 +42,7 @@ public class JwtValidationMiddleware
             return;
         }
 
-        if (context.Request.Path.StartsWithSegments("/api/public/content"))
+        if (context.Request.Path.StartsWithSegments("/api/public"))
         {
             await _next(context);
             return;
@@ -95,52 +95,75 @@ public class JwtValidationMiddleware
             return;
         }
 
-        bool isWriteOperation = context.Request.Method == HttpMethods.Post
-            || context.Request.Method == HttpMethods.Put
-            || context.Request.Method == HttpMethods.Delete;
-
-        if (isWriteOperation)
+        // Enforce organisation-level role on every org-scoped endpoint.
+        // Reads (GET/HEAD) require at least Viewer membership; writes require Editor or higher.
+        // This mirrors the role hierarchy enforced by the cmsOrg service.
+        var routeData = context.GetRouteData();
+        if (routeData.Values.TryGetValue("organisationId", out var orgIdValue) && orgIdValue != null)
         {
-            var routeData = context.GetRouteData();
-            if (routeData.Values.TryGetValue("organisationId", out var orgIdValue) && orgIdValue != null)
+            bool isWriteOperation = HttpMethods.IsPost(context.Request.Method)
+                || HttpMethods.IsPut(context.Request.Method)
+                || HttpMethods.IsDelete(context.Request.Method)
+                || HttpMethods.IsPatch(context.Request.Method);
+
+            string requiredRole = isWriteOperation ? "Editor" : "Viewer";
+
+            string? role;
+            try
             {
-                try
+                var client = _httpClientFactory.CreateClient();
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+                var roleResponse = await client.GetAsync(
+                    $"{_jwtSettings.CmsOrgUrl}/organisations/{orgIdValue}/role");
+
+                if (!roleResponse.IsSuccessStatusCode)
                 {
-                    var client = _httpClientFactory.CreateClient();
-                    client.DefaultRequestHeaders.Authorization =
-                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-                    var roleResponse = await client.GetAsync(
-                        $"{_jwtSettings.CmsOrgUrl}/organisations/{orgIdValue}/role");
-
-                    if (!roleResponse.IsSuccessStatusCode)
-                    {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        await context.Response.WriteAsync("Could not verify organisation role.");
-                        return;
-                    }
-
-                    var roleJson = await roleResponse.Content.ReadAsStringAsync();
-                    var roleDoc = System.Text.Json.JsonDocument.Parse(roleJson);
-                    var role = roleDoc.RootElement.GetProperty("role").GetString();
-
-                    if (role != "Admin" && role != "Editor")
-                    {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        await context.Response.WriteAsync("Editor or Admin role required.");
-                        return;
-                    }
-                }
-                catch (HttpRequestException ex)
-                {
-                    _logger.LogError(ex, "cmsorg service unreachable at {CmsOrgUrl}.", _jwtSettings.CmsOrgUrl);
-                    context.Response.StatusCode = StatusCodes.Status502BadGateway;
-                    await context.Response.WriteAsync("Organisation service unavailable.");
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await context.Response.WriteAsync("Could not verify organisation role.");
                     return;
                 }
+
+                var roleJson = await roleResponse.Content.ReadAsStringAsync();
+                using var roleDoc = System.Text.Json.JsonDocument.Parse(roleJson);
+                role = roleDoc.RootElement.TryGetProperty("role", out var roleEl)
+                    ? roleEl.GetString()
+                    : null;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "cmsorg service unreachable at {CmsOrgUrl}.", _jwtSettings.CmsOrgUrl);
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                await context.Response.WriteAsync("Organisation service unavailable.");
+                return;
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                _logger.LogError(ex, "cmsorg /role returned an unexpected payload.");
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                await context.Response.WriteAsync("Organisation service returned an invalid response.");
+                return;
+            }
+
+            // role is null when the user is not a member of the organisation.
+            if (GetRoleWeight(role) < GetRoleWeight(requiredRole))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsync($"'{requiredRole}' role or higher is required for this organisation.");
+                return;
             }
         }
 
         await _next(context);
     }
+
+    // Admin (3) > Editor (2) > Viewer (1); unknown/non-member = 0.
+    private static int GetRoleWeight(string? role) => role switch
+    {
+        "Admin" => 3,
+        "Editor" => 2,
+        "Viewer" => 1,
+        _ => 0
+    };
 }

@@ -22,16 +22,19 @@ public class ContentManagmentService : IContentManagmentService
     private readonly AppDbContext _dbContext;
     private readonly ElasticsearchClient _elasticClient;
     private readonly ElasticSettings _elasticSettings;
+    private readonly IContentCache _cache;
     private readonly ILogger<ContentManagmentService> _logger;
 
     public ContentManagmentService(
         AppDbContext dbContext,
         ElasticsearchClient elasticClient,
         IOptions<ElasticSettings> elasticOptions,
+        IContentCache cache,
         ILogger<ContentManagmentService> logger)
     {
         _dbContext = dbContext;
         _elasticClient = elasticClient;
+        _cache = cache;
         _logger = logger;
         _elasticSettings = elasticOptions.Value;
     }
@@ -67,7 +70,19 @@ public class ContentManagmentService : IContentManagmentService
         return content;
     }
 
-    public async Task<List<ContentDTO>> FilterContents(Guid organisationId, string? query, string? tag, string? category, string? status, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = false)
+    // Public read cache keys. Public content is published-only and org-scoped, so the
+    // cache is keyed by organisation plus the request shape. Entries expire by TTL; the
+    // slug entry is also invalidated explicitly whenever the underlying content changes.
+    private static string PublicSlugKey(Guid? organisationId, string slug)
+        => $"public:content:{organisationId?.ToString() ?? "all"}:slug:{slug}";
+
+    private static string PublicListKey(Guid? organisationId, string? query, string? tag, string? category, DateTime? fromDate, DateTime? toDate, int page, int pageSize)
+        => $"public:content:{organisationId?.ToString() ?? "all"}:list:{query}:{tag}:{category}:{fromDate:o}:{toDate:o}:{page}:{pageSize}";
+
+    private Task InvalidatePublicSlugAsync(Guid organisationId, string? slug)
+        => string.IsNullOrWhiteSpace(slug) ? Task.CompletedTask : _cache.RemoveAsync(PublicSlugKey(organisationId, slug));
+
+    public async Task<List<ContentDTO>> FilterContents(Guid organisationId, string? query, string? tag, string? category, string? status, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = true)
     {
         if (withElastic)
         {
@@ -89,7 +104,7 @@ public class ContentManagmentService : IContentManagmentService
                             must.Add(m => m.MultiMatch(mm => mm
                                 .Fields(new [] { "title", "richContent" })
                                 .Query(query)
-                                .Fuzziness(new Fuzziness(7))
+                                .Fuzziness(new Fuzziness(2))
                             ));
                         }
 
@@ -211,6 +226,7 @@ public class ContentManagmentService : IContentManagmentService
         content.Status = "Deleted";
         await _dbContext.SaveChangesAsync();
         await RemoveContentFromIndexAsync(contentId);
+        await InvalidatePublicSlugAsync(organisationId, content.Slug);
     }
 
     public async Task UpdateContent(Guid organisationId, Guid contentId, SaveContentDTO content)
@@ -223,6 +239,7 @@ public class ContentManagmentService : IContentManagmentService
         if (contentToBeUpdated == null) throw GeneralErrorCodes.NotFound;
 
         await DoSaveContent(contentToBeUpdated, content);
+        await InvalidatePublicSlugAsync(organisationId, contentToBeUpdated.Slug);
     }
 
     private async Task DoSaveContent(Content contentToBeUpdated, SaveContentDTO content)
@@ -341,6 +358,7 @@ public class ContentManagmentService : IContentManagmentService
         content.Status = "Unpublished";
         await _dbContext.SaveChangesAsync();
         await IndexContentAsync(content);
+        await InvalidatePublicSlugAsync(organisationId, content.Slug);
     }
 
     public async Task AddAssetUrlToContent(Guid organisationId, Guid contentId, string assetUrl)
@@ -356,6 +374,7 @@ public class ContentManagmentService : IContentManagmentService
 
         await _dbContext.SaveChangesAsync();
         await IndexContentAsync(content);
+        await InvalidatePublicSlugAsync(organisationId, content.Slug);
     }
 
     public async Task UpdateContentAssetUrl(Guid contentId, string assetUrl)
@@ -371,9 +390,19 @@ public class ContentManagmentService : IContentManagmentService
 
         await _dbContext.SaveChangesAsync();
         await IndexContentAsync(content);
+        await InvalidatePublicSlugAsync(content.OrganisationId, content.Slug);
     }
 
-    public async Task<List<PublicContentDTO>> GetPublicContents(string? query, string? tag, string? category, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = false, Guid? organisationId = null)
+    public async Task<List<PublicContentDTO>> GetPublicContents(string? query, string? tag, string? category, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = true, Guid? organisationId = null)
+    {
+        var cached = await _cache.GetOrCreateAsync(
+            PublicListKey(organisationId, query, tag, category, fromDate, toDate, page, pageSize),
+            () => FetchPublicContentsAsync(query, tag, category, fromDate, toDate, page, pageSize, withElastic, organisationId));
+
+        return cached ?? new List<PublicContentDTO>();
+    }
+
+    private async Task<List<PublicContentDTO>?> FetchPublicContentsAsync(string? query, string? tag, string? category, DateTime? fromDate, DateTime? toDate, int page, int pageSize, bool withElastic = true, Guid? organisationId = null)
     {
         if (withElastic)
         {
@@ -399,7 +428,7 @@ public class ContentManagmentService : IContentManagmentService
                             must.Add(m => m.MultiMatch(mm => mm
                                 .Fields(new [] { "title", "richContent" })
                                 .Query(query)
-                                .Fuzziness(new Fuzziness(7))
+                                .Fuzziness(new Fuzziness(2))
                             ));
                         }
 
@@ -530,6 +559,8 @@ public class ContentManagmentService : IContentManagmentService
                 content.ContentId,
                 content.Title,
                 content.RichContent,
+                content.Slug,
+                content.AssetUrl,
                 content.Status,
                 content.CreatedOn,
                 content.UpdatedOn,
@@ -573,41 +604,47 @@ public class ContentManagmentService : IContentManagmentService
 
     public async Task<PublicContentDTO> GetPublicContentBySlug(string slug, Guid? organisationId = null)
     {
-        var queryable = _dbContext.Contents
-            .Include(c => c.Category)
-            .Include(c => c.Tags)
-            .Where(c => c.Slug == slug && c.Status == "Published");
-
-        if (organisationId.HasValue)
+        var dto = await _cache.GetOrCreateAsync(PublicSlugKey(organisationId, slug), async () =>
         {
-            queryable = queryable.Where(c => c.OrganisationId == organisationId.Value);
-        }
+            var queryable = _dbContext.Contents
+                .Include(c => c.Category)
+                .Include(c => c.Tags)
+                .Where(c => c.Slug == slug && c.Status == "Published");
 
-        var content = await queryable.FirstOrDefaultAsync();
-        if (content == null) throw GeneralErrorCodes.NotFound;
+            if (organisationId.HasValue)
+            {
+                queryable = queryable.Where(c => c.OrganisationId == organisationId.Value);
+            }
 
-        return new PublicContentDTO
-        {
-            ContentId = content.ContentId,
-            Title = content.Title,
-            Slug = content.Slug,
-            RichContent = content.RichContent,
-            AssetUrl = content.AssetUrl,
-            Status = content.Status,
-            CreatedOn = content.CreatedOn,
-            UpdatedOn = content.UpdatedOn,
-            OrganisationId = content.OrganisationId,
-            Category = content.Category == null ? null : new CategoryDTO
+            var content = await queryable.FirstOrDefaultAsync();
+            if (content == null) return null;
+
+            return new PublicContentDTO
             {
-                CategoryId = content.Category.CategoryId,
-                Name = content.Category.Name,
-                Description = content.Category.Description
-            },
-            Tags = content.Tags.Select(t => new TagDTO
-            {
-                TagId = t.TagId,
-                Name = t.Name
-            }).ToList()
-        };
+                ContentId = content.ContentId,
+                Title = content.Title,
+                Slug = content.Slug,
+                RichContent = content.RichContent,
+                AssetUrl = content.AssetUrl,
+                Status = content.Status,
+                CreatedOn = content.CreatedOn,
+                UpdatedOn = content.UpdatedOn,
+                OrganisationId = content.OrganisationId,
+                Category = content.Category == null ? null : new CategoryDTO
+                {
+                    CategoryId = content.Category.CategoryId,
+                    Name = content.Category.Name,
+                    Description = content.Category.Description
+                },
+                Tags = content.Tags.Select(t => new TagDTO
+                {
+                    TagId = t.TagId,
+                    Name = t.Name
+                }).ToList()
+            };
+        });
+
+        if (dto == null) throw GeneralErrorCodes.NotFound;
+        return dto;
     }
 }
