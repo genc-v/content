@@ -84,6 +84,7 @@ public class ContentManagementController : ControllerBase
             Slug = content.Slug,
             RichContent = content.RichContent,
             OrganisationId = content.OrganisationId,
+            UserId = content.UserId,
             CategoryId = content.CategoryId,
             CategoryName = content.Category?.Name,
             CreatedOn = content.CreatedOn,

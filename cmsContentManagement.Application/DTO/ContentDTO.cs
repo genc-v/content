@@ -9,7 +9,8 @@ public class ContentDTO
     public string? Slug { get; set; }
     public string? RichContent {  get; set; }
     public Guid OrganisationId { get; set; }
-    
+    public Guid UserId { get; set; }
+
     public Guid? CategoryId { get; set; }
     public string? CategoryName { get; set; }
 
