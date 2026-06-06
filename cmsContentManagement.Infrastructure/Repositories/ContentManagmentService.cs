@@ -57,7 +57,7 @@ public class ContentManagmentService : IContentManagmentService
         return content.ContentId;
     }
 
-    public async Task<Content> getContentById(Guid organisationId, Guid contentId, Guid userId)
+    public async Task<Content> getContentById(Guid organisationId, Guid contentId)
     {
         var content = await _dbContext.Contents
             .Include(c => c.Category)
@@ -65,7 +65,6 @@ public class ContentManagmentService : IContentManagmentService
             .FirstOrDefaultAsync(e => e.OrganisationId == organisationId && e.ContentId == contentId);
 
         if (content == null) throw GeneralErrorCodes.NotFound;
-        if (content.UserId != userId) throw GeneralErrorCodes.PermissionDenied;
 
         return content;
     }

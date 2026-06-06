@@ -24,7 +24,7 @@ public class ContentManagementController : ControllerBase
     [HttpGet("{contentId}")]
     public async Task<ActionResult<ContentDTO>> GetContent(Guid organisationId, Guid contentId)
     {
-        var content = await _contentManagmentService.getContentById(organisationId, contentId, User.GetUserId());
+        var content = await _contentManagmentService.getContentById(organisationId, contentId);
         return Ok(MapToDto(content));
     }
 
