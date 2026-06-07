@@ -17,6 +17,5 @@ public class Tag
     [Required]
     public Guid UserId { get; set; }
     
-    // Navigation property
     public ICollection<Content> Contents { get; set; } = new List<Content>();
 }

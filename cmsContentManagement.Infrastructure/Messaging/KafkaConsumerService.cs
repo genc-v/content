@@ -33,7 +33,6 @@ public class KafkaConsumerService : BackgroundService
             GroupId = _settings.GroupId,
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = false,
-            // Add robustness
             SocketTimeoutMs = 60000,
             SessionTimeoutMs = 30000,
         };
@@ -89,9 +88,6 @@ public class KafkaConsumerService : BackgroundService
                         using (var scope = _serviceProvider.CreateScope())
                         {
                             var contentService = scope.ServiceProvider.GetRequiredService<IContentManagmentService>();
-                            // We need a method that doesn't require UserId, or we need to know the UserId
-                            // Assuming for now a new method UpdateContentAssetUrl exists or we use the existing one if we had UserId
-                            // Since we don't have UserId in the event (assumed), we'll add a system update method.
                             await contentService.UpdateContentAssetUrl(fileEvent.EntryId, fileEvent.Url);
                         }
                         
@@ -100,14 +96,13 @@ public class KafkaConsumerService : BackgroundService
                     else 
                     {
                          _logger.LogWarning("Invalid message format");
-                         // Commit anyway to avoid blocking? Or DLQ? For now commit.
                          _consumer.Commit(consumeResult);
                     }
                 }
                 catch (JsonException ex)
                 {
                     _logger.LogError(ex, "Error deserializing Kafka message");
-                    _consumer.Commit(consumeResult); // Skip bad message
+                    _consumer.Commit(consumeResult);
                 }
             }
             catch (OperationCanceledException)
@@ -117,7 +112,6 @@ public class KafkaConsumerService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error consuming Kafka message");
-                // Wait a bit before retrying
                 await Task.Delay(1000, stoppingToken);
             }
         }

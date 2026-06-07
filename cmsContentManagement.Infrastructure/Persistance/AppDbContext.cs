@@ -16,12 +16,10 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
         
-        // Configure Many-to-Many for Content <-> Tag
         modelBuilder.Entity<Content>()
             .HasMany(c => c.Tags)
             .WithMany(t => t.Contents);
-            
-        // Configure One-to-Many for Category <-> Content
+
         modelBuilder.Entity<Content>()
             .HasOne(c => c.Category)
             .WithMany(cat => cat.Contents)

@@ -1,202 +1,350 @@
-# CMS API për Menaxhimin e Përmbajtjes
+# CMS Content Management Service
 
-Një API RESTful i fuqishëm i projektuar për sistemet e menaxhimit të përmbajtjes, që ofron aftësi për të menaxhuar përmbajtjen, kategoritë, etiketat (tags) dhe aksesin e sigurt përmes API keys.
+The Content Management Service is the core writing and publishing microservice of the CMS platform. It owns every content entry that authors create — from first draft through publication — and exposes two distinct APIs: a private management API for authenticated editors and an unauthenticated public API for frontend consumers. It is one of three backend services in the platform:
 
-## 🚀 Veçoritë
+| Service | Repo | Responsibility |
+|---|---|---|
+| **Auth** (`cmsUserManagment`) | `../auth` | User registration, login, JWT issuance, 2FA, roles, notifications |
+| **Assets** (`assets`) | `../assets` | S3 file uploads, asset metadata, Kafka event publishing |
+| **Content** (`cmsContentManagement`) | this repo | Entry authoring, search, caching, public delivery |
 
-- **Menaxhimi i Përmbajtjes**: Krijimi, përditësimi, kërkimi dhe menaxhimi i ciklit të jetës së përmbajtjes.
-- **Kategorizimi**: Organizimi i përmbajtjes me kategori dhe etiketa të personalizueshme.
-- **Aksesi Publik**: Endpoint-e të dedikuara për konsumin publik të përmbajtjes të siguruara me API keys.
-- **Siguria**: Autentifikim hibrid duke përdorur _JWT Bearer tokens_ për administrim dhe _API Keys_ për akses publik.
+---
 
-## 🔐 Autentifikimi
+## Why this service exists
 
-| Lloji          | Header                          | Përdorimi                                                                          |
-| -------------- | ------------------------------- | ---------------------------------------------------------------------------------- |
-| **JWT Bearer** | `Authorization: Bearer <token>` | Endpoint-et administrative (Përmbajtja, Kategoritë, Etiketat, Gjenerimi i API Key) |
-| **API Key**    | `X-Api-Key: <your-api-key>`     | Endpoint-et për konsumin e përmbajtjes publike                                     |
+A CMS front-end needs a place to create, draft, and publish structured content (articles, landing pages, blog posts). Rather than bundling that into the auth service, content management is separated so it can scale independently, use its own database, and expose a clean public read API without leaking internal write surfaces. The public API is keyed separately from JWT so that external frontends or static-site generators can fetch published entries without user credentials.
 
-## 📡 Pasqyra e Endpoint-eve
+---
 
-### Menaxhimi i API Key
+## How the three services interact
 
-_Menaxhoni çelësat e aksesit për klientët publikë._
-
-- `POST /ApiKey/generate` - Gjenero një API key të ri.
-- `GET /ApiKey` - Listo API keys aktivë.
-- `DELETE /ApiKey/{keyId}` - Revoko një API key.
-
-### Kategoritë
-
-_Organizoni strukturën e përmbajtjes suaj._
-
-- `GET /Category` - Merr të gjitha kategoritë.
-- `POST /Category` - Krijo një kategori të re.
-- `PUT /Category` - Përditëso një kategori ekzistuese.
-- `GET /Category/{id}` - Merr detajet e kategorisë.
-- `DELETE /Category/{id}` - Fshi një kategori.
-
-### Menaxhimi i Përmbajtjes
-
-_Administrimi kryesor për krijuesit e përmbajtjes._
-
-- `GET /ContentManagment` - Kërkim i avancuar (filtra: query, tag, status, data).
-- `GET /ContentManagment/{contentId}` - Merr detajet e plota të përmbajtjes.
-- `PUT /ContentManagment/{contentId}` - Krijo ose përditëso përmbajtje.
-- `DELETE /ContentManagment/{contentId}` - Fshi përmbajtje.
-- `POST /ContentManagment/{contentId}/unpublish` - Tërhiq përmbajtjen e publikuar.
-- `GET /ContentManagment/generate-new-id` - Mjet për të para-gjeneruar ID-të e përmbajtjes.
-
-### Përmbajtja Publike
-
-_Endpoint-et e drejtuara nga konsumatori._
-
-- `GET /api/public/content` - Merr përmbajtjen e publikuar (mbështet faqrosjen & filtrimin).
-- `GET /api/public/content/{slug}` - Merr një artikull të vetëm sipas slug-ut.
-
-### Etiketat (Tags)
-
-_Metadata fleksibël për përmbajtjen._
-
-- `GET /Tag` - Listo të gjitha etiketat.
-- `POST /Tag` - Krijo një etiketë të re.
-- `PUT /Tag` - Përditëso një etiketë.
-- `GET /Tag/{id}` - Merr informacionin e etiketës.
-- `DELETE /Tag/{id}` - Fshi një etiketë.
-
-## 🛠️ Shembuj Përdorimi
-
-### Marrja e Përmbajtjes Publike
-
-```bash
-curl -X GET "https://api.cms.com/api/public/content?page=1&pageSize=10" \
-     -H "X-Api-Key: YOUR_API_KEY"
+```
+Browser / Editor                Auth Service           Assets Service         Content Service
+       |                             |                       |                      |
+       |-- POST /api/auth/login ----->|                       |                      |
+       |<-- JWT token ---------------||                       |                      |
+       |                             |                       |                      |
+       |-- GET /{orgId}/entry/new-id (JWT) ---------------------------------------->|
+       |<-- contentId -----------------------------------------------------------------------|
+       |                             |                       |                      |
+       |-- POST /organisations/:orgId/assets (JWT + contentId) -->|                |
+       |                             |                       |-- S3 upload          |
+       |                             |                       |-- Kafka: files.uploaded event ->|
+       |                             |                       |                      |-- update AssetUrl
+       |                             |                       |                      |-- re-evaluate status
+       |                             |                       |                      |
+       |-- PUT /{orgId}/entry/{id} (JWT + body) ------------------------------------------>|
+       |<-- 200 OK (entry saved, auto-published if complete) ----------------------------|
+       |                             |                       |                      |
+Public Consumer                      |                       |                      |
+       |-- GET /api/public/content (X-Api-Key header) ----------------------------------->|
+       |<-- published entries (from Redis or DB) -----------------------------------------|
 ```
 
-### Krijimi i një Artikulli (Admin)
+**Key integration points:**
 
-```bash
-curl -X PUT "https://api.cms.com/ContentManagment/{contentId}" \
-     -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "title": "Welcome to the CMS",
-           "assetUrl": "https://example.com/image.png",
-           "richContent": "<p>Hello World</p>",
-           "categoryName": "News",
-           "tags": ["announcement", "v1"]
-         }'
+- The JWT the user gets from Auth is validated by the Content service on every private request. For org-scoped routes, Content also calls the Auth/Org service (`CmsOrgUrl`) to verify the user's role inside that organisation.
+- The API key for public reads is also validated against the Auth/Org service (`/api-keys/validate`), which returns the `organisationId` the key belongs to.
+- When a file is uploaded through Assets, it publishes a `files.uploaded` Kafka message containing `entryId` and `url`. Content consumes this and writes the asset URL back onto the entry, then re-checks whether the entry is now complete enough to auto-publish.
+
+---
+
+## Architecture
+
+The project follows Clean Architecture with four layers:
+
+```
+cmsContentManagement.Domain          — entities, no dependencies
+cmsContentManagement.Application     — DTOs, interfaces, settings
+cmsContentManagement.Infrastructure  — EF Core, Elasticsearch, Redis, Kafka
+cmsContentManagement.API             — controllers, middleware, DI wiring
+cmsContentManagement.Tests           — unit tests
 ```
 
-## 🏗️ Zhvillimi
+**Domain** owns the three entity types (Content, Category, Tag) with no framework dependencies. **Application** defines the service contracts and the settings classes that map to configuration. **Infrastructure** implements those contracts against real databases and message brokers. **API** wires everything together and handles HTTP concerns: routing, auth middleware, error handling, and Swagger.
 
-### Parakushtet
+---
 
-- .NET 8.0 SDK (ose version i pajtueshëm)
-- Docker (për varësitë e bazës së të dhënave/infrastrukturës)
+## Database
 
-### Ekzekutimi Lokal
+**Engine:** MySQL 8 via Entity Framework Core (migrations in `cmsContentManagement.Infrastructure/Migrations`).
 
-1. Starto shërbimet e infrastrukturës:
-   ```bash
-   docker compose up -d
-   ```
-2. Ekzekuto API-në:
-   ```bash
-   dotnet run --project cmsContentManagement.API
-   ```
+### Table: `Contents`
 
-### 💾 Struktura e Bazës së Të Dhënave
+The central table. One row per content entry.
 
-Baza e të dhënave menaxhohet përmes **Entity Framework Core** dhe përbëhet nga entitetet kryesore të mëposhtme. Strukturat tabelare janë dizajnuar për performancë dhe integritet të të dhënave.
+| Column | Type | Notes |
+|---|---|---|
+| `ContentId` | `GUID` PK | Auto-generated |
+| `Title` | `string?` | Display title; must be unique within the org (non-deleted entries) |
+| `Slug` | `string?` | URL-safe identifier, e.g. `/my-article`. Auto-generated from Title on first save; never regenerated after that |
+| `RichContent` | `string?` | HTML or rich text body |
+| `AssetUrl` | `string?` (URL) | Set either manually or by the Kafka consumer when Assets uploads a file |
+| `Status` | `string` | `New` → `Draft` → `Published` / `Unpublished` → `Deleted` |
+| `CreatedOn` | `DateTime` | UTC, set on insert |
+| `UpdatedOn` | `DateTime` | UTC, updated on every save |
+| `OrganisationId` | `GUID` | Tenant scope — every query filters by this |
+| `UserId` | `GUID` | The user who created the entry |
+| `CategoryId` | `GUID?` FK | Optional reference to `Categories` |
 
-#### 1. Tabela `Content`
+### Table: `Categories`
 
-_Ruan entitetet kryesore të sistemit (artikujt, lajmet, postimet)._
+Used to group entries. Scoped to an organisation.
 
-| Kolona          | Tipi i të Dhënave | Përshkrimi                                                  |
-| :-------------- | :---------------- | :---------------------------------------------------------- |
-| **ContentId**   | `Guid` (PK)       | Çelësi primar unik për identifikimin e përmbajtjes.         |
-| **Title**       | `String`          | Titulli kryesor i përmbajtjes.                              |
-| **Slug**        | `String`          | Identifikues për URL (SEO-friendly).                        |
-| **RichContent** | `String`          | Teksti i plotë ose HTML i përmbajtjes.                      |
-| **AssetUrl**    | `String` (URL)    | URL për imazhet ose mediat e lidhura.                       |
-| **Status**      | `String`          | Statusi i jetës së përmbajtjes (p.sh., "New", "Published"). |
-| **CreatedOn**   | `DateTime`        | Data dhe koha e krijimit.                                   |
-| **UpdatedOn**   | `DateTime`        | Data dhe koha e përditësimit të fundit.                     |
-| **UserId**      | `Guid`            | Identifikuesi i përdoruesit që krijoi përmbajtjen.          |
-| **CategoryId**  | `Guid` (FK)       | Referencë për kategorinë (Lidhje One-to-Many).              |
+| Column | Type | Notes |
+|---|---|---|
+| `CategoryId` | `GUID` PK | |
+| `Name` | `string` max 100 | Required; unique per org |
+| `Description` | `string?` | Optional |
+| `OrganisationId` | `GUID` | Tenant scope |
+| `UserId` | `GUID` | Creator |
 
-#### 2. Tabela `Category`
+### Table: `Tags`
 
-_Strukturimi dhe grupimi i përmbajtjes._
+Free-form labels for cross-cutting classification. Scoped to an organisation.
 
-| Kolona          | Tipi i të Dhënave  | Përshkrimi                         |
-| :-------------- | :----------------- | :--------------------------------- |
-| **CategoryId**  | `Guid` (PK)        | Çelësi primar unik.                |
-| **Name**        | `String` (Max 100) | Emri i kategorisë (i detyrueshëm). |
-| **Description** | `String`           | Përshkrim opsional për kategorinë. |
+| Column | Type | Notes |
+|---|---|---|
+| `TagId` | `GUID` PK | |
+| `Name` | `string` max 50 | Required; unique per org |
+| `OrganisationId` | `GUID` | Tenant scope |
+| `UserId` | `GUID` | Creator |
 
-#### 3. Tabela `Tag`
+### Relationships
 
-_Etiketat për klasifikim horizontal dhe filtrim._
+- `Content` → `Category`: **Many-to-One** (`CategoryId` FK, nullable). One entry has at most one category; a category can contain many entries.
+- `Content` ↔ `Tag`: **Many-to-Many** via an EF Core shadow join table (`ContentTag`). One entry can carry multiple tags; one tag can appear on multiple entries.
 
-| Kolona    | Tipi i të Dhënave | Përshkrimi                       |
-| :-------- | :---------------- | :------------------------------- |
-| **TagId** | `Guid` (PK)       | Çelësi primar unik.              |
-| **Name**  | `String` (Max 50) | Emri i etiketës (i detyrueshëm). |
+---
 
-_Shënim: Lidhja Many-to-Many midis `Content` dhe `Tag` realizohet përmes një tabele të ndërmjetme (join table) të menaxhuar automatikisht._
+## Content lifecycle (status machine)
 
-#### 4. Tabela `ApiKey`
+Status is set automatically every time an entry is saved; it is never set manually by the caller.
 
-_Menaxhimi i sigurisë dhe aksesit për klientët e jashtëm._
+```
+  GenerateNewContentId()
+         |
+         v
+       [New]  ──── UpdateContent() with incomplete fields ────> [Draft]
+                                                                    |
+         UpdateContent() / UpdateContentAssetUrl()                  |
+         (Title + RichContent + Category + AssetUrl all present)    |
+                                                                    v
+                                                              [Published]
+                                                                    |
+                                                     UnpublishContent()
+                                                                    |
+                                                                    v
+                                                            [Unpublished]
+                                                                    |
+                                              DeleteContent() (soft delete)
+                                                                    |
+                                                                    v
+                                                              [Deleted]
+```
 
-| Kolona          | Tipi i të Dhënave | Përshkrimi                                        |
-| :-------------- | :---------------- | :------------------------------------------------ |
-| **Id**          | `Guid` (PK)       | Identifikuesi unik i çelësit.                     |
-| **UserId**      | `Guid`            | ID e përdoruesit që zotëron çelësin.              |
-| **Key**         | `String`          | Vlera aktuale e çelësit (string i koduar).        |
-| **Description** | `String`          | Përshkrim për qëllimin e çelësit.                 |
-| **IsActive**    | `Boolean`         | Përcakton nëse çelësi është aktiv apo i revokuar. |
-| **CreatedAt**   | `DateTime`        | Data e gjenerimit të çelësit.                     |
+- **New** — stub row created by `GET /{orgId}/entry/new-id`. The caller uses this ID when uploading a file via Assets so the Kafka event can reference it before any content is saved.
+- **Draft** — entry has been saved but at least one of (Title, RichContent, Category, AssetUrl) is missing or points to a non-existent org resource.
+- **Published** — all four required fields are present and valid. Only Published entries are returned by the public API.
+- **Unpublished** — manually pulled from the public feed but still intact. Can be re-published by saving it again with complete fields.
+- **Deleted** — soft delete. The row stays in MySQL and Elasticsearch index is removed. Deleted entries are excluded from all queries.
 
-#### 5. Relacionet Kryesore (ER)
+---
 
-- **Content ➡ Category**: Një përmbajtje i përket një kategorie (One-to-Many).
-- **Content ➡ Tags**: Një përmbajtje mund të ketë shumë etiketa dhe një etiketë lidhet me shumë përmbajtje (Many-to-Many).
+## Search
 
-## ✅ Përputhshmëria me Kërkesat Teknike
+Every write (create, update, delete, unpublish, asset attach) calls `IndexContentAsync`, which pushes the entry to Elasticsearch. The indexed document includes nested `Category` and `Tags` objects so that tag and category filters work without joins.
 
-Ky projekt është zhvilluar në përputhje me standardet moderne të shërbimeve web dhe plotëson kërkesat teknike kryesore si më poshtë:
+When Elasticsearch is available (`withElastic=true`, the default), search and list queries are served from the index with fuzzy full-text matching (fuzziness 2) across `title` and `richContent`. Pagination is applied at the Elasticsearch layer (`from` / `size`).
 
-### 1. Arkitektura e Sistemit
+If Elasticsearch returns an invalid response, the service falls back to a MySQL query automatically. Callers can also force MySQL by passing `withElastic=false`.
 
-- **Dizajni Modular**: Është adoptuar **Clean Architecture** (Domain, Application, Infrastructure, API layers) duke siguruar ndarje të përgjegjësive dhe mirëmbajtje të lehtë.
-- **RESTful API**: Metoda standarde HTTP, URI të bazuara në burime (resource-based), dhe negocim të përmbajtjes JSON.
-- **Stateless**: Ndërveprimi është plotësisht stateless, duke u mbështetur në JWT dhe API tokens në vend të sesioneve në anën e serverit.
+The Elasticsearch index name defaults to `"content"` and is configurable via `ElasticSettings:DefaultIndex`. Basic auth is optional (`ElasticSettings:Username` / `Password`).
 
-### 2. Siguria
+---
 
-- **Autentifikimi**:
-  - Implementimi i **JWT (JSON Web Token)** për akses të sigurt administrativ (Skema Bearer).
-  - Mekanizmi i **API Keys** (`X-Api-Key`) për autentifikimin e klientëve të jashtëm publikë.
-- **Mbrojtja**: Pipeline i Middleware (`JwtValidationMiddleware`) siguron vlefshmërinë e kërkesave para përpunimit.
+## Caching
 
-### 3. Performanca dhe Shkallëzueshmëria
+Public-facing read paths go through a Redis read-through cache (`ContentCache`):
 
-- **Aksesi i Optimizuar i të Dhënave**: Mbështetje për **Pagination** (`page`, `pageSize`) për menaxhimin e ngarkesës.
-- **Mbështetje për Elasticsearch**: Integrim (`withElastic`) për kërkim me performancë të lartë.
-- **Caching**: Përdorimi i **Redis** për të ulur kohën e përgjigjes.
-- **Dizajni Asinkron**: Përdorim i plotë i modeleve `async/await` të .NET për operacione jo-bllokuese.
+- **Slug lookup** — key `public:content:{orgId}:slug:{slug}`
+- **List/search** — key `public:content:{orgId}:list:{query}:{tag}:{category}:{fromDate}:{toDate}:{page}:{pageSize}`
 
-### 4. Dokumentimi i API
+Cache entries expire by TTL (configured via `Cache:ContentTtlSeconds`, default 60 s). The slug entry is also invalidated explicitly whenever the underlying content changes (update, unpublish, delete, asset attach). List keys are only invalidated by TTL.
 
-- **OpenAPI 3.0**: Specifikim gjithëpërfshirës përmes **Swagger**, që detajon të gjitha endpoint-et, skemat dhe kërkesat e sigurisë.
-- **Ndërfaqe Interaktive**: Swagger UI e aktivizuar për testim të drejtpërdrejtë dhe verifikim vizual të sipërfaqes së API.
+Redis is treated as best-effort: any Redis failure (read, write, or remove) is caught and logged, and the request falls through to the database. A cache outage cannot take down a request.
 
-### 5. Standardet dhe Teknologjitë
+`null` results are never cached — if a slug lookup returns nothing from the DB, the cache stays empty so a subsequent publish is visible immediately.
 
-- **Tech Stack**: Ndërtuar mbi **.NET 8** (C#) dhe **Entity Framework Core**.
-- **Cilësia e Kodit**: I përmbahet **parimeve SOLID** dhe praktikave të Clean Code.
-- **Mjedisi**: Mbështetje për **Docker** e përfshirë për zhvillim të kontejnerizuar dhe konsistencë në vendosje (deploy).
+---
+
+## Kafka consumer
+
+The service runs a `KafkaConsumerService` background worker (topic: `files.uploaded`). When Assets finishes uploading a file to S3, it publishes:
+
+```json
+{
+  "entryId": "<uuid>",
+  "assetId": "<string>",
+  "key": "<s3-key>",
+  "url": "<public-cdn-url>"
+}
+```
+
+The consumer calls `UpdateContentAssetUrl(entryId, url)`, which:
+1. Writes the URL to `Content.AssetUrl`
+2. Re-evaluates status (the entry may auto-publish if it was already complete except for the asset)
+3. Re-indexes the entry in Elasticsearch
+4. Invalidates the public slug cache
+
+The consumer commits the offset after a successful update. Deserialization failures commit anyway to avoid blocking the partition on a malformed message.
+
+---
+
+## Authentication and authorisation
+
+### Private management API (JWT)
+
+`JwtValidationMiddleware` runs before every request. It:
+1. Skips `/swagger`, `[AllowAnonymous]` endpoints, and `/api/public/*`.
+2. Validates the `Authorization: Bearer <token>` header against the shared JWT secret (HS256, issuer + audience checked, zero clock skew).
+3. For routes that contain an `{organisationId}` segment, calls `{CmsOrgUrl}/organisations/{orgId}/role` to fetch the user's role in that org.
+4. Applies the role gate: **GET/HEAD** require at least `Viewer`; **POST/PUT/DELETE/PATCH** require at least `Editor`.
+
+Role hierarchy: `Admin (3) > Editor (2) > Viewer (1)`. A user not in the org resolves to weight 0 and is rejected.
+
+### Public API (API key)
+
+`/api/public/*` routes skip JWT validation entirely. Each request must supply an API key in the `X-Api-Key` header (preferred) or in the request body (`ApiKey` field, kept for backwards compatibility). The key is forwarded to `{CmsOrgUrl}/api-keys/validate`, which returns the `organisationId` the key belongs to. Content results are then scoped to that organisation.
+
+### Export/Import (Admin only)
+
+`ExportImportController` additionally calls the org service to confirm the user holds the `Admin` role before any export or import is executed.
+
+---
+
+## API reference
+
+All private routes are prefixed with `/{organisationId:guid}` and require a valid JWT with the appropriate org role.
+
+### Entries — private (`/{organisationId}/entry`)
+
+| Method | Path | Min role | Description |
+|---|---|---|---|
+| `GET` | `/new-id` | Viewer | Reserve a new entry ID (creates a stub with status `New`) |
+| `GET` | `/` | Viewer | List/search entries. Query params: `query`, `tag`, `category`, `status`, `fromDate`, `toDate`, `page` (default 1), `pageSize` (default 25), `withElastic` (default true) |
+| `GET` | `/{contentId}` | Viewer | Fetch a single entry with category and tags |
+| `PUT` | `/{contentId}` | Editor | Save (create or update) entry fields. Status is auto-computed |
+| `POST` | `/{contentId}/unpublish` | Editor | Move entry from Published → Unpublished |
+| `DELETE` | `/{contentId}` | Editor | Soft-delete (status → Deleted) |
+
+**Save payload (`SaveContentDTO`):**
+```json
+{
+  "title": "string",
+  "richContent": "string (HTML)",
+  "assetUrl": "string (URL, optional — usually set by Kafka)",
+  "categoryId": "uuid (optional)",
+  "categoryName": "string (informational, not used to set category)",
+  "tags": [{ "tagId": "uuid", "name": "string" }]
+}
+```
+
+### Categories — private (`/{organisationId}/category`)
+
+| Method | Path | Min role | Description |
+|---|---|---|---|
+| `GET` | `/` | Viewer | List categories. Params: `page`, `pageSize`, `search` |
+| `GET` | `/{id}` | Viewer | Get by ID |
+| `POST` | `/` | Editor | Create. 409 if name already exists in org |
+| `PUT` | `/` | Editor | Update name/description |
+| `DELETE` | `/{id}` | Editor | Delete |
+
+### Tags — private (`/{organisationId}/tag`)
+
+| Method | Path | Min role | Description |
+|---|---|---|---|
+| `GET` | `/` | Viewer | List tags. Params: `page`, `pageSize`, `search` |
+| `GET` | `/{id}` | Viewer | Get by ID |
+| `POST` | `/` | Editor | Create. 409 if name already exists in org |
+| `PUT` | `/` | Editor | Update name |
+| `DELETE` | `/{id}` | Editor | Delete |
+
+### Export / Import — private (`/{organisationId}`, Admin only)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/entry/export?format=json\|csv\|excel` | Export all non-deleted entries |
+| `POST` | `/entry/import` | Import entries from JSON / CSV / XLSX file |
+| `GET` | `/category/export?format=json\|csv\|excel` | Export all categories |
+| `GET` | `/tag/export?format=json\|csv\|excel` | Export all tags |
+
+Import rules: rows missing a `Title` are skipped. Duplicate titles (within the org, non-deleted) are skipped. Missing categories and tags are created automatically. Slug collisions get a 6-char UUID suffix appended. Status is auto-computed on import (Published if Title + RichContent + Category + AssetUrl are all present, otherwise Draft).
+
+### Public API (`/api/public`, API key required)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/content` | List published entries. Params: `query`, `tag`, `category`, `fromDate`, `toDate`, `page` (default 1), `pageSize` (default 10), `withElastic` (default true) |
+| `POST` | `/content` | Fetch one entry by slug. Body: `{ "slug": "...", "apiKey": "..." }` (apiKey in body as fallback) |
+| `POST` | `/search` | Advanced search. Body: `PublicSearchRequestDTO` with `query`, `tag`, `category`, `fromDate`, `toDate`, `page`, `pageSize`, `withElastic`, `apiKey` |
+| `GET` | `/categories` | List org categories. Params: `page`, `pageSize`, `search` |
+| `GET` | `/tags` | List org tags. Params: `page`, `pageSize`, `search` |
+
+---
+
+## Configuration
+
+All settings come from `appsettings.json` / environment variables (double-underscore notation for env vars, e.g. `JwtSettings__Secret`).
+
+| Section / Key | Required | Description |
+|---|---|---|
+| `ConnectionStrings:DefaultConnection` | Yes | MySQL connection string |
+| `Redis:Connection` | Yes | Redis connection string (e.g. `redis:6379`) |
+| `JwtSettings:Secret` | Yes | HS256 signing key (must match Auth service) |
+| `JwtSettings:Issuer` | Yes | JWT issuer claim (e.g. `cms`) |
+| `JwtSettings:Audience` | Yes | JWT audience claim (e.g. `account`) |
+| `JwtSettings:CmsOrgUrl` | Yes | Base URL of the Auth/Org service for role and API-key validation |
+| `ElasticSettings:Url` | Yes | Elasticsearch base URL |
+| `ElasticSettings:DefaultIndex` | No | Index name (default: `content`) |
+| `ElasticSettings:Username` | No | Basic auth username for Elasticsearch |
+| `ElasticSettings:Password` | No | Basic auth password for Elasticsearch |
+| `Cache:ContentTtlSeconds` | No | Redis entry TTL in seconds (default: 60) |
+| `KafkaSettings:BootstrapServers` | Yes | Kafka broker addresses (e.g. `kafka:9092`) |
+| `KafkaSettings:GroupId` | Yes | Kafka consumer group ID |
+| `KafkaSettings:Topic` | Yes | Topic to consume (e.g. `files.uploaded`) |
+
+---
+
+## Running locally
+
+**Prerequisites:** Docker, .NET 8 SDK.
+
+```bash
+# Start MySQL, Redis, and the service itself
+docker compose up -d
+
+# Or run the API directly (needs MySQL + Redis already running)
+dotnet run --project cmsContentManagement.API
+```
+
+Swagger UI is available at `http://localhost:5054/swagger`.
+
+The compose file maps:
+- API → `localhost:5054`
+- MySQL → `localhost:33062`
+- Redis → `localhost:6380`
+
+Elasticsearch is commented out in the compose file; the service falls back to MySQL queries when it is not configured.
+
+To connect the service to Kafka, the compose file joins the `nest-s3-kafka_default` external Docker network (created by the Assets service compose). Start Assets first, then Content.
+
+---
+
+## Running tests
+
+```bash
+dotnet test cmsContentManagement.Tests
+```
+
+The test project covers `CategoryService` with in-memory EF Core.
