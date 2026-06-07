@@ -4,6 +4,7 @@ using cmsContentManagement.Middleware;
 using cmsContentManagement.API.Middleware;
 using cmsContentManagment.Infrastructure.Persistance;
 using cmsContentManagment.Infrastructure.Repositories;
+using cmsContentManagment.Infrastructure.Services;
 using cmsContentManagment.Infrastructure.Caching;
 using cmsContentManagement.API.Services;
 using cmsContentManagement.Infrastructure.Messaging;
@@ -100,6 +101,7 @@ builder.Services.AddScoped<IApiKeyValidator, ApiKeyValidator>();
 builder.Services.AddScoped<IContentManagmentService, ContentManagmentService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<ITagService, TagService>();
+builder.Services.AddScoped<IContentExportImportService, ContentExportImportService>();
 
 builder.Services.Configure<KafkaSettings>(builder.Configuration.GetSection("KafkaSettings"));
 builder.Services.AddHostedService<KafkaConsumerService>();
